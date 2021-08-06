@@ -209,6 +209,49 @@ class TransformerConfig(FairseqDataclass):
         metadata={"help": "shuffle tokens between workers before computing assignment"},
     )
 
+    moe_layers: Optional[int] = field(
+        default=0, metadata={"help": "number of MoE layers in total"}
+    )
+    moe_sublayers: Optional[int] = field(
+        default=1, metadata={"help": "number of sublayers in each MoE layer"}
+    )
+    moe_shuffle: Optional[int] = field(
+        default=1,
+        metadata={"help": "shuffle tokens between workers before computing assignment"},
+    )
+    moe_shared_layer: Optional[bool] = field(
+        default=False,
+        metadata={"help": ""},
+    )
+    moe_shared_experts: Optional[bool] = field(
+        default=False,
+        metadata={"help": ""},
+    )
+    moe_placement: Optional[str] = field(
+        default='original',
+        metadata={"help": "choices: original, stacked"},
+    )
+    moe_layer_indices: Optional[List[int]] = field(
+        default=None,
+        metadata={},
+    )
+    moe_in_decoder_layer: Optional[bool] = field(
+        default=True,
+        metadata={},
+    )
+    # moe_share_attention: Optional[bool] = field(
+    #     default=False,
+    #     metadata={},
+    # )
+    moe_bloss_weight: Optional[float] = field(
+        default=1.0,
+        metadata={},
+    )
+    moe_bloss_type: Optional[str] = field(
+        default='mean',
+        metadata={},
+    )
+
     export: bool = field(
         default=False,
         metadata={"help": "make the layernorm exportable with torchscript."},

@@ -5,7 +5,7 @@
 
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List
 
 from fairseq import options, utils
 from fairseq.dataclass import ChoiceEnum, FairseqDataclass
@@ -190,6 +190,49 @@ class TransformerLanguageModelConfig(FairseqDataclass):
     base_shuffle: Optional[int] = field(
         default=1, metadata={"help": "shuffle tokens between workers before computing assignment"}
     )
+
+    moe_layers: Optional[int] = field(
+        default=0, metadata={"help": "number of MoE layers in total"}
+    )
+    moe_sublayers: Optional[int] = field(
+        default=1, metadata={"help": "number of sublayers in each MoE layer"}
+    )
+    moe_shuffle: Optional[int] = field(
+        default=1,
+        metadata={"help": "shuffle tokens between workers before computing assignment"},
+    )
+    moe_shared_layer: Optional[bool] = field(
+        default=False,
+        metadata={"help": ""},
+    )
+    moe_shared_experts: Optional[bool] = field(
+        default=False,
+        metadata={"help": ""},
+    )
+    moe_placement: Optional[str] = field(
+        default='original',
+        metadata={"help": "choices: original, stacked"},
+    )
+    moe_layer_indices: Optional[List[int]] = field(
+        default=None,
+        metadata={},
+    )
+    moe_in_decoder_layer: Optional[bool] = field(
+        default=True,
+        metadata={},
+    )
+    # moe_share_attention: Optional[bool] = field(
+    #     default=False,
+    #     metadata={},
+    # )
+    moe_bloss_weight: Optional[float] = field(
+        default=1.0,
+        metadata={},
+    )
+    moe_bloss_type: Optional[str] = field(
+        default='mean',
+        metadata={},
+    )
     # options from other parts of the config
     add_bos_token: bool = II("task.add_bos_token")
     tokens_per_sample: int = II("task.tokens_per_sample")
@@ -326,6 +369,17 @@ def base_lm_architecture(args):
     args.base_layers = getattr(args, "base_layers", 0)
     args.base_sublayers = getattr(args, "base_sublayers", 1)
     args.base_shuffle = getattr(args, "base_shuffle", False)
+
+    args.moe_layers = getattr(args, "moe_layers", 0)
+    args.moe_sublayers = getattr(args, "moe_sublayers", 1)
+    args.moe_shuffle = getattr(args, "moe_shuffle", False)
+    args.moe_shared_layer = getattr(args, "moe_shared_layer", False)
+    args.moe_shared_experts = getattr(args, "moe_shared_experts", False)
+    args.moe_placement = getattr(args, "moe_placement", "original")
+    args.moe_layer_indices = getattr(args, "moe_layer_indices", None)
+    args.moe_in_decoder_layer = getattr(args, "moe_in_decoder_layer", True)
+    args.moe_bloss_weight = getattr(args, "moe_bloss_weight", 1.0)
+    args.moe_bloss_type = getattr(args, "moe_bloss_type", "mean")
 
     args.add_bos_token = getattr(args, "add_bos_token", False)
     args.no_token_positional_embeddings = getattr(

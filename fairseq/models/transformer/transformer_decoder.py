@@ -18,6 +18,8 @@ from fairseq.modules import (
     FairseqDropout,
     LayerDropModuleList,
     LayerNorm,
+    MoELayer,
+    MoETransformerDecoderLayerBase,
     PositionalEmbedding,
     SinusoidalPositionalEmbedding,
 )
@@ -114,12 +116,52 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             self.layers = LayerDropModuleList(p=self.decoder_layerdrop)
         else:
             self.layers = nn.ModuleList([])
+
+        num_moe_layers = cfg.moe_layers
+        moe_indices = cfg.moe_layer_indices
+        extra_moe_indices = []
+        if moe_indices is None:
+            # if no indices were specified, intersperse them as in the original papers
+            moe_indices = [((i + 1) * cfg.decoder.layers) // (num_moe_layers + 1) for i in range(num_moe_layers)]
+        if not cfg.moe_in_decoder_layer:
+            # if moe layers are to be separately added outside of decoder layers, leave indices empty here
+            extra_moe_indices = moe_indices
+            moe_indices = []
+        # weight tying MoE layers
+        shared_moe_layer = MoELayer(cfg) if cfg.moe_shared_layer else None
+        shared_moe_experts = (
+            nn.Sequential(*([MoESublayer(args) for _ in range(args.base_sublayers)]))
+            if cfg.moe_shared_experts and not cfg.moe_shared_layer
+            else None
+        )
+
         self.layers.extend(
             [
-                self.build_decoder_layer(cfg, no_encoder_attn)
-                for _ in range(cfg.decoder.layers)
+                # MoETransformerDecoderLayerBase(
+                #     cfg, shared_moe_layer=shared_moe_layer, shared_moe_experts=shared_moe_experts
+                # ) if i in moe_indices
+                self.build_decoder_layer(
+                    cfg, no_encoder_attn=no_encoder_attn, shared_moe_layer=shared_moe_layer, 
+                    shared_moe_experts=shared_moe_experts, moe=(True if i in moe_indices else False)
+                ) for i in range(cfg.decoder.layers)
             ]
         )
+
+        if extra_moe_indices:
+            if not shared_moe_layer:
+                for i in extra_moe_indices:
+                    self.layers.insert(i, MoELayer(cfg, shared_moe_experts=shared_moe_experts))
+            else:
+                shared_moe_layer = MoELayer(cfg) if cfg.moe_shared_layer else None
+                for i in extra_moe_indices:
+                    self.layers.insert(i, shared_moe_layer)
+
+        num_base_layers = cfg.base_layers
+        for i in range(num_base_layers):
+            self.layers.insert(
+                ((i + 1) * cfg.decoder.layers) // (num_base_layers + 1),
+                BaseLayer(cfg),
+            )
         self.num_layers = len(self.layers)
 
         if cfg.decoder.normalize_before and not cfg.no_decoder_final_norm:
@@ -163,15 +205,19 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             nn.init.normal_(
                 self.output_projection.weight, mean=0, std=self.output_embed_dim ** -0.5
             )
-        num_base_layers = cfg.base_layers
-        for i in range(num_base_layers):
-            self.layers.insert(
-                ((i + 1) * cfg.decoder.layers) // (num_base_layers + 1),
-                BaseLayer(cfg),
-            )
 
-    def build_decoder_layer(self, cfg, no_encoder_attn=False):
-        layer = transformer_layer.TransformerDecoderLayerBase(cfg, no_encoder_attn)
+    def build_decoder_layer(
+        self, cfg, no_encoder_attn=False, 
+        shared_moe_layer=None, shared_moe_experts=None, moe=False,
+    ):
+        # TODO @margsli does this need to be modified for MoE? 
+        if moe:
+            layer = MoETransformerDecoderLayerBase(
+                cfg, no_encoder_attn=no_encoder_attn, 
+                shared_moe_layer=shared_moe_layer, shared_moe_experts=shared_moe_experts
+            )
+        else:
+            layer = transformer_layer.TransformerDecoderLayerBase(cfg, no_encoder_attn=no_encoder_attn)
         checkpoint = cfg.checkpoint_activations
         if checkpoint:
             offload_to_cpu = cfg.offload_activations
@@ -476,7 +522,12 @@ class TransformerDecoder(TransformerDecoderBase):
             TransformerConfig.from_namespace(args), dictionary, embed_tokens
         )
 
-    def build_decoder_layer(self, args, no_encoder_attn=False):
+    def build_decoder_layer(
+        self, args, no_encoder_attn=False, shared_moe_layer=None, 
+        shared_moe_experts=None, moe=False,
+    ):
         return super().build_decoder_layer(
-            TransformerConfig.from_namespace(args), no_encoder_attn=no_encoder_attn
+            TransformerConfig.from_namespace(args), no_encoder_attn=no_encoder_attn,
+            shared_moe_layer=shared_moe_layer, shared_moe_experts=shared_moe_experts,
+            moe=False,
         )
