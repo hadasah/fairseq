@@ -118,7 +118,7 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             self.layers = nn.ModuleList([])
 
         num_moe_layers = cfg.moe_layers
-        moe_indices = cfg.moe_layer_indices
+        moe_indices = utils.eval_str_list(cfg.moe_layer_indices, type=int)
         extra_moe_indices = []
         if moe_indices is None:
             # if no indices were specified, intersperse them as in the original papers
@@ -137,9 +137,6 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
 
         self.layers.extend(
             [
-                # MoETransformerDecoderLayerBase(
-                #     cfg, shared_moe_layer=shared_moe_layer, shared_moe_experts=shared_moe_experts
-                # ) if i in moe_indices
                 self.build_decoder_layer(
                     cfg, no_encoder_attn=no_encoder_attn, shared_moe_layer=shared_moe_layer, 
                     shared_moe_experts=shared_moe_experts, moe=(True if i in moe_indices else False)
@@ -529,5 +526,5 @@ class TransformerDecoder(TransformerDecoderBase):
         return super().build_decoder_layer(
             TransformerConfig.from_namespace(args), no_encoder_attn=no_encoder_attn,
             shared_moe_layer=shared_moe_layer, shared_moe_experts=shared_moe_experts,
-            moe=False,
+            moe=moe,
         )

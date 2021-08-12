@@ -213,9 +213,9 @@ class TransformerLanguageModelConfig(FairseqDataclass):
         default='original',
         metadata={"help": "choices: original, stacked"},
     )
-    moe_layer_indices: Optional[List[int]] = field(
+    moe_layer_indices: Optional[str] = field(
         default=None,
-        metadata={},
+        metadata={"help": "comma separated of indices at which to place MoE layers"},
     )
     moe_in_decoder_layer: Optional[bool] = field(
         default=True,
@@ -231,6 +231,10 @@ class TransformerLanguageModelConfig(FairseqDataclass):
     )
     moe_bloss_type: Optional[str] = field(
         default='mean',
+        metadata={},
+    )
+    moe_use_ff_norms: Optional[bool] = field(
+        default=False,
         metadata={},
     )
     # options from other parts of the config

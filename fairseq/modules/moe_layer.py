@@ -34,6 +34,9 @@ class MoELayer(nn.Module):
         self.shuffle = args.base_shuffle
         self.bloss_type = args.moe_bloss_type
         self.bloss_weight = args.moe_bloss_weight
+        # self.ff_norms = nn.ModuleList([
+        #     LayerNorm(dim1), LayerNorm(dim2), LayerNorm(dim3)
+        # ]) if args.moe_use_ff_norms else None
 
         # Add a special attribute to the expert parameters, so we know not to sync their gradients
         # 
@@ -410,7 +413,7 @@ class MoETransformerDecoderLayerBase(nn.Module):
         # x = self.activation_fn(self.fc1(x))
         # x = self.activation_dropout_module(x)
         # x = self.fc2(x)
-        x = self.moe(x)
+        x, _, _ = self.moe(x)
 
         x = self.dropout_module(x)
         x = self.residual_connection(x, residual)

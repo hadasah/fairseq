@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from fairseq import metrics, utils
 from fairseq.criterions import FairseqCriterion, register_criterion
 from fairseq.dataclass import FairseqDataclass
+from fairseq.modules.moe_layer import MoELayer
 from omegaconf import II
 
 
