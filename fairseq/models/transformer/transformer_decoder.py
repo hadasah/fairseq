@@ -18,12 +18,11 @@ from fairseq.modules import (
     FairseqDropout,
     LayerDropModuleList,
     LayerNorm,
-    MoELayer,
-    MoETransformerDecoderLayerBase,
     PositionalEmbedding,
     SinusoidalPositionalEmbedding,
 )
 from fairseq.modules import transformer_layer
+from fairseq.modules import moe_layer
 from fairseq.modules.checkpoint_activations import checkpoint_wrapper
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
 from torch import Tensor
@@ -128,9 +127,9 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             extra_moe_indices = moe_indices
             moe_indices = []
         # weight tying MoE layers
-        shared_moe_layer = MoELayer(cfg) if cfg.moe_shared_layer else None
+        shared_moe_layer = moe_layer.MoELayer(cfg) if cfg.moe_shared_layer else None
         shared_moe_experts = (
-            nn.Sequential(*([MoESublayer(args) for _ in range(args.base_sublayers)]))
+            nn.Sequential(*([moe_layer.MoESublayer(args) for _ in range(args.base_sublayers)]))
             if cfg.moe_shared_experts and not cfg.moe_shared_layer
             else None
         )
@@ -147,9 +146,9 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
         if extra_moe_indices:
             if not shared_moe_layer:
                 for i in extra_moe_indices:
-                    self.layers.insert(i, MoELayer(cfg, shared_moe_experts=shared_moe_experts))
+                    self.layers.insert(i, moe_layer.MoELayer(cfg, shared_moe_experts=shared_moe_experts))
             else:
-                shared_moe_layer = MoELayer(cfg) if cfg.moe_shared_layer else None
+                shared_moe_layer = moe_layer.MoELayer(cfg) if cfg.moe_shared_layer else None
                 for i in extra_moe_indices:
                     self.layers.insert(i, shared_moe_layer)
 
@@ -209,7 +208,7 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
     ):
         # TODO @margsli does this need to be modified for MoE? 
         if moe:
-            layer = MoETransformerDecoderLayerBase(
+            layer = moe_layer.MoETransformerDecoderLayerBase(
                 cfg, no_encoder_attn=no_encoder_attn, 
                 shared_moe_layer=shared_moe_layer, shared_moe_experts=shared_moe_experts
             )

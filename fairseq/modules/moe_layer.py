@@ -12,6 +12,7 @@ import sys
 
 from fairseq import utils
 from fairseq.distributed import utils as distributed_utils
+# from fairseq.modules import FairseqDropout, LayerNorm, MultiheadAttention
 from fairseq.modules.fairseq_dropout import FairseqDropout
 from fairseq.modules.layer_norm import LayerNorm
 from fairseq.modules.multihead_attention import MultiheadAttention
@@ -107,7 +108,7 @@ class MoELayer(nn.Module):
             input_splits = All2All.apply(output_splits)
             return worker2token, input_splits.tolist(), output_splits.tolist()
 
-    def calc_last_loss(self):
+    def calc_last_bloss(self):
         if not self.training: return 0.0
 
         # GShard basline uses a group size of 1024

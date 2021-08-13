@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from fairseq import metrics, utils
 from fairseq.criterions import FairseqCriterion, register_criterion
 from fairseq.dataclass import FairseqDataclass
-from fairseq.modules.moe_layer import MoELayer
+# from fairseq.modules.moe_layer import MoELayer
 from omegaconf import II
 
 
@@ -120,8 +120,9 @@ class MoECrossEntropyCriterion(FairseqCriterion):
     def compute_loss(self, model, net_output, sample, reduce=True):
         gate_loss = 0
         for name, module in model.named_modules():
-            if isinstance(module, MoELayer):
-                gate_loss += module.calc_last_loss()
+            if callable(getattr(module, "calc_last_bloss", None)):
+            # if isinstance(module, MoELayer):
+                gate_loss += module.calc_last_bloss()
 
         lprobs = model.get_normalized_probs(net_output, log_probs=True)
         lprobs = lprobs.view(-1, lprobs.size(-1))
