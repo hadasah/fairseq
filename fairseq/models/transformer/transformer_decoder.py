@@ -126,32 +126,38 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             # if moe layers are to be separately added outside of decoder layers, leave indices empty here
             extra_moe_indices = moe_indices
             moe_indices = []
-        # weight tying MoE layers
-        shared_moe_layer = moe_layer.MoELayer(cfg) if cfg.moe_shared_layer else None
+        if 0 in moe_indices:
+            raise RuntimeError('0th decoder layer is an MoE layer. This probably won\'t work well.')
+        # weight tying experts, MoE layers, or MoE Decoder layers
         shared_moe_experts = (
             nn.Sequential(*([moe_layer.MoESublayer(args) for _ in range(args.base_sublayers)]))
-            if cfg.moe_shared_experts and not cfg.moe_shared_layer
+            if (cfg.moe_shared_experts and not cfg.moe_shared_moe_layer and not cfg.moe_shared_decoder_layer)
             else None
         )
-
-        self.layers.extend(
-            [
-                self.build_decoder_layer(
-                    cfg, no_encoder_attn=no_encoder_attn, shared_moe_layer=shared_moe_layer, 
-                    shared_moe_experts=shared_moe_experts, moe=(True if i in moe_indices else False)
-                ) for i in range(cfg.decoder.layers)
-            ]
-        )
-
+        shared_moe_layer = moe_layer.MoELayer(cfg) if (cfg.moe_shared_moe_layer and not cfg.moe_shared_decoder_layer) else None
+        shared_moe_decoder_layer = self.build_decoder_layer(
+                cfg, no_encoder_attn=no_encoder_attn, shared_moe_layer=shared_moe_layer, 
+                shared_moe_experts=shared_moe_experts, moe=True,
+            ) if cfg.moe_shared_decoder_layer else None
+        # create the stack of layers
+        self.layers.extend([(
+            shared_moe_decoder_layer 
+            if i in moe_indices and shared_moe_decoder_layer
+            else self.build_decoder_layer(
+                cfg, no_encoder_attn=no_encoder_attn, shared_moe_layer=shared_moe_layer, 
+                shared_moe_experts=shared_moe_experts, moe=(True if i in moe_indices else False))
+        ) for i in range(cfg.decoder.layers)])
+        # insert the MoE layers in addition to the decoder layers, if needed
         if extra_moe_indices:
-            if not shared_moe_layer:
-                for i in extra_moe_indices:
-                    self.layers.insert(i, moe_layer.MoELayer(cfg, shared_moe_experts=shared_moe_experts))
-            else:
-                shared_moe_layer = moe_layer.MoELayer(cfg) if cfg.moe_shared_layer else None
+            if shared_moe_layer:
+                # shared_moe_layer = moe_layer.MoELayer(cfg) if cfg.moe_shared_moe_layer else None
                 for i in extra_moe_indices:
                     self.layers.insert(i, shared_moe_layer)
+            else:
+                for i in extra_moe_indices:
+                    self.layers.insert(i, moe_layer.MoELayer(cfg, shared_moe_experts=shared_moe_experts))
 
+        # base layers
         num_base_layers = cfg.base_layers
         for i in range(num_base_layers):
             self.layers.insert(
@@ -203,8 +209,8 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             )
 
     def build_decoder_layer(
-        self, cfg, no_encoder_attn=False, 
-        shared_moe_layer=None, shared_moe_experts=None, moe=False,
+        self, cfg, no_encoder_attn=False, shared_moe_layer=None, shared_moe_experts=None, 
+        moe=False, 
     ):
         # TODO @margsli does this need to be modified for MoE? 
         if moe:

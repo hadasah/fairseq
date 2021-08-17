@@ -5,6 +5,7 @@
 
 from typing import Dict, List, Optional
 
+import math
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
@@ -19,14 +20,18 @@ from fairseq.modules.multihead_attention import MultiheadAttention
 from torch import Tensor
 
 
+LOGGING_SAMPLE_FRACTION = 0.2
+
 class MoELayer(nn.Module):
 
     def __init__(self, args, shared_moe_experts=None):
         super().__init__()
         self.num_workers = distributed_utils.get_data_parallel_world_size()
-        expert_centroids = torch.empty(self.num_workers, args.decoder_embed_dim)
-        torch.nn.init.orthogonal_(expert_centroids, gain=0.1)
-        self.register_parameter("expert_centroids", torch.nn.Parameter(expert_centroids))
+        # expert_centroids = torch.empty(self.num_workers, args.decoder_embed_dim)
+        # torch.nn.init.orthogonal_(expert_centroids, gain=0.1)
+        # self.register_parameter("expert_centroids", torch.nn.Parameter(expert_centroids))
+        # self.register_parameter("expert_centroids", torch.nn.Linear(args.decoder_embed_dim, self.num_workers, bias=False))
+        self.expert_centroids = torch.nn.Linear(args.decoder_embed_dim, self.num_workers, bias=False)
         self.expert_network = (
             shared_moe_experts if shared_moe_experts
             else nn.Sequential(*([MoESublayer(args) for _ in range(args.base_sublayers)]))
@@ -35,16 +40,15 @@ class MoELayer(nn.Module):
         self.shuffle = args.base_shuffle
         self.bloss_type = args.moe_bloss_type
         self.bloss_weight = args.moe_bloss_weight
-        # self.ff_norms = nn.ModuleList([
-        #     LayerNorm(dim1), LayerNorm(dim2), LayerNorm(dim3)
-        # ]) if args.moe_use_ff_norms else None
-
+        self.use_fp32_gating = args.moe_use_fp32_gating
         # Add a special attribute to the expert parameters, so we know not to sync their gradients
         # 
         for param in self.expert_network.parameters():
             param.expert = True
 
     def forward(self, input_features, *args, **kwargs):
+        # input_features is s x b x e
+        # features is now sb x e (which I just refer to as s x e afterwards)
         features = input_features.reshape(-1, input_features.size(-1))
         is_training = input_features.requires_grad
 
@@ -53,25 +57,14 @@ class MoELayer(nn.Module):
             shuffle_sort = torch.randperm(features.size(0), device=features.device)
             features = All2All.apply(features[shuffle_sort])
 
-        with torch.no_grad():
-            # Compute similarity of each token to each expert, for routing
-            token_expert_affinities = features.matmul(self.expert_centroids.transpose(0, 1))
-            # TODO @margsli should be identical to below, is the einsum faster?
-            # check that features and expert_centroids' dimensions are ordered correctly
-            # token_expert_affinities = torch.einsum('sbh,eh->sbe', features, self.expert_centroids)
-            # TODO @margsli this is only argmax, should the other sampling strategies be implemented?
-            self.last_p = torch.softmax(token_expert_affinities, -1)
-
         # Compute which token goes to which expert
         routing_strategy = 'greedy'
-        sort_by_expert, input_splits, output_splits = self.assignment(token_expert_affinities, strategy=routing_strategy)
+        sort_by_expert, input_splits, output_splits, self.moe_metadata = self.assignment(features, strategy=routing_strategy)
         # Swap these tokens for the right ones for our expert
         routed_features = All2All.apply(features[sort_by_expert], output_splits, input_splits)
 
         if routed_features.size(0) > 0:
-            # Mix in the expert network based on how appropriate it is for these tokens
-            alpha = torch.sigmoid(routed_features.mv(self.expert_centroids[self.expert_id])).unsqueeze(1)
-            routed_features = alpha * self.expert_network(routed_features) + (1 - alpha) * routed_features
+            routed_features = self.expert_network(routed_features)
         # Return to original worker and ordering
         result = All2All.apply(routed_features, input_splits, output_splits)[self.inverse_sort(sort_by_expert)]
 
@@ -88,12 +81,43 @@ class MoELayer(nn.Module):
 
     # Assigns each token to the top k experts
     # NOTE: this ONLY works for k=1 right now b/c of self.last_mask assignment
-    def assignment(self, scores, strategy='greedy', k=1):
+    # features is s x e
+    def assignment(self, features, strategy='greedy', k=1):
+        def entropy(probs): #, logits):
+            logits = torch.distributions.utils.probs_to_logits(probs)
+            p_log_p = probs * logits
+            return -p_log_p.sum(-1)
+
+        metadata = {}
+        # Compute similarity of each token to each expert, for routing
+        # features is s x e , expert_centroids is e x h 
+        logits = self.expert_centroids(features)
+        # logits = features.matmul(self.expert_centroids.transpose(0, 1))
+        # logits has dims s x e
+        if self.use_fp32_gating:
+            orig_dtype = logits.dtype
+            logits = logits.float()
+        # TODO @margsli this is only argmax, should the other sampling strategies be implemented?
+        self.last_p = torch.softmax(logits, -1)
+        metadata["entropy_gating"] = entropy(probs=self.last_p).mean().detach()
+
         if strategy == 'greedy':
             # get a flattened list of the workers to send each token to
-            # scores is s,b,e, token_to_workers is s*b, with the worker # for each token
-            idx = torch.topk(scores, dim=1, k=k, largest=True).indices
+            # logits is [sxb,e], token_to_workers is [sxb], with the worker # for each token
+            idx = torch.topk(logits, dim=1, k=k, largest=True).indices
             self.last_mask = F.one_hot(idx[:, 0], num_classes=self.num_workers)
+
+            # log expert usage
+            num_tokens = logits.shape[0]
+            expert1_hist = 100 * torch.histc((idx.squeeze() + 1), bins=self.num_workers, min=1, max=self.num_workers) / num_tokens
+            metadata["unused_expert1_count"] = (expert1_hist == 0).sum()
+            expert1_hist = torch.sort(expert1_hist, dim=0, descending=True).values + torch.finfo(torch.float32).tiny
+
+            # log whether the routing is balanced (top and bottom)
+            sample_count = max(math.ceil(self.num_workers * LOGGING_SAMPLE_FRACTION), 1)
+            metadata["expert1_balance_top"] = expert1_hist[:sample_count].sum()
+            metadata["expert1_balance_bottom"] = expert1_hist[-sample_count:].sum()
+
             token_to_workers = idx.view(-1)
             # token_to_workers is worker # for each token, sorted, sort_ordering gives original index
             token_to_workers, sort_ordering = torch.sort(token_to_workers)
@@ -101,12 +125,12 @@ class MoELayer(nn.Module):
             worker2token = sort_ordering // k
 
             # Find how many tokens we're sending to each other worker (being careful for sending 0 tokens to some workers)
-            output_splits = torch.zeros((self.num_workers,), dtype=torch.long, device=scores.device)
+            output_splits = torch.zeros((self.num_workers,), dtype=torch.long, device=logits.device)
             workers, counts = torch.unique_consecutive(token_to_workers, return_counts=True)
             output_splits[workers] = counts
             # Tell other workers how many tokens to expect from us
             input_splits = All2All.apply(output_splits)
-            return worker2token, input_splits.tolist(), output_splits.tolist()
+            return worker2token, input_splits.tolist(), output_splits.tolist(), metadata
 
     def calc_last_bloss(self):
         if not self.training: return 0.0
@@ -123,20 +147,20 @@ class MoELayer(nn.Module):
          # is about 500 at the beginning of training
         tf_constant_scale = (tokens_per_batch/group_size)*gpus*micro_batches
         if self.last_p is not None:
-            if self.loss_type == 'mean-diff':
+            if self.bloss_type == 'mean-diff':
                 frac = self.last_mask.float().mean(0)
                 p = self.last_p.float().mean(0)
                 frac -= 1./self.num_workers
                 frac = torch.abs(frac)
-            elif self.loss_type == 'mean':
+            elif self.bloss_type == 'mean':
                 frac = self.last_mask.float().mean(0)
                 p = self.last_p.float().mean(0)
             else:
-                print(self.loss_type)
+                print(self.bloss_type)
                 raise NotImplementedError('Loss type not implemented')
 
             # we do sum reduction instead of mean reduction; in fairseq the loss is normalized later
-            loss = tf_constant_scale*(frac*p).mean()*(self.num_workers**2)*self.iloss_weight
+            loss = tf_constant_scale*(frac*p).mean()*(self.num_workers**2)*self.bloss_weight
 
             return loss
         else:
@@ -408,8 +432,8 @@ class MoETransformerDecoderLayerBase(nn.Module):
                 x = self.encoder_attn_layer_norm(x)
 
         residual = x
-        # if self.normalize_before:
-        #     x = self.final_layer_norm(x)
+        if self.normalize_before:
+            x = self.final_layer_norm(x)
 
         # x = self.activation_fn(self.fc1(x))
         # x = self.activation_dropout_module(x)
@@ -418,8 +442,8 @@ class MoETransformerDecoderLayerBase(nn.Module):
 
         x = self.dropout_module(x)
         x = self.residual_connection(x, residual)
-        # if not self.normalize_before:
-        #     x = self.final_layer_norm(x)
+        if not self.normalize_before:
+            x = self.final_layer_norm(x)
         if self.onnx_trace and incremental_state is not None:
             saved_state = self.self_attn._get_input_buffer(incremental_state)
             assert saved_state is not None

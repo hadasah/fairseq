@@ -219,25 +219,29 @@ class TransformerConfig(FairseqDataclass):
         default=1,
         metadata={"help": "shuffle tokens between workers before computing assignment"},
     )
-    moe_shared_layer: Optional[bool] = field(
+    moe_shared_moe_layer: Optional[bool] = field(
         default=False,
-        metadata={"help": ""},
+        metadata={"help": "tie the entirety of the MoE layers"},
+    )
+    moe_shared_decoder_layer: Optional[bool] = field(
+        default=False,
+        metadata={"help": "tie the entirety of the MoE decoder layers"},
     )
     moe_shared_experts: Optional[bool] = field(
         default=False,
-        metadata={"help": ""},
+        metadata={"help": "tie the expert weights"},
     )
-    moe_placement: Optional[str] = field(
-        default='original',
-        metadata={"help": "choices: original, stacked"},
-    )
-    moe_layer_indices: Optional[List[int]] = field(
+    # moe_placement: Optional[str] = field(
+    #     default='original',
+    #     metadata={"help": ""},
+    # )
+    moe_layer_indices: Optional[str] = field(
         default=None,
-        metadata={},
+        metadata={"help": "comma separated of indices at which to place MoE layers"},
     )
     moe_in_decoder_layer: Optional[bool] = field(
         default=True,
-        metadata={},
+        metadata={"help": "whether to use MoE within the decoder layers or in addition"}
     )
     # moe_share_attention: Optional[bool] = field(
     #     default=False,
@@ -249,7 +253,11 @@ class TransformerConfig(FairseqDataclass):
     )
     moe_bloss_type: Optional[str] = field(
         default='mean',
-        metadata={},
+        metadata={'help': 'which balancing loss to use. Options: mean or mean-diff'},
+    )
+    moe_use_fp32_gating: Optional[bool] = field(
+        default=True,
+        metadata={"help": "use fp32 for gate logits (stabilizes)"}
     )
 
     export: bool = field(

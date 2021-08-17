@@ -201,25 +201,29 @@ class TransformerLanguageModelConfig(FairseqDataclass):
         default=1,
         metadata={"help": "shuffle tokens between workers before computing assignment"},
     )
-    moe_shared_layer: Optional[bool] = field(
+    moe_shared_moe_layer: Optional[bool] = field(
         default=False,
-        metadata={"help": ""},
+        metadata={"help": "tie the entirety of the MoE layers"},
+    )
+    moe_shared_decoder_layer: Optional[bool] = field(
+        default=False,
+        metadata={"help": "tie the entirety of the MoE decoder layers"},
     )
     moe_shared_experts: Optional[bool] = field(
         default=False,
-        metadata={"help": ""},
+        metadata={"help": "tie the expert weights"},
     )
-    moe_placement: Optional[str] = field(
-        default='original',
-        metadata={"help": "choices: original, stacked"},
-    )
+    # moe_placement: Optional[str] = field(
+    #     default='original',
+    #     metadata={"help": ""},
+    # )
     moe_layer_indices: Optional[str] = field(
         default=None,
         metadata={"help": "comma separated of indices at which to place MoE layers"},
     )
     moe_in_decoder_layer: Optional[bool] = field(
         default=True,
-        metadata={},
+        metadata={"help": "whether to use MoE within the decoder layers or in addition"}
     )
     # moe_share_attention: Optional[bool] = field(
     #     default=False,
@@ -231,11 +235,11 @@ class TransformerLanguageModelConfig(FairseqDataclass):
     )
     moe_bloss_type: Optional[str] = field(
         default='mean',
-        metadata={},
+        metadata={'help': 'which balancing loss to use. Options: mean or mean-diff'},
     )
-    moe_use_ff_norms: Optional[bool] = field(
-        default=False,
-        metadata={},
+    moe_use_fp32_gating: Optional[bool] = field(
+        default=True,
+        metadata={"help": "use fp32 for gate logits (stabilizes)"}
     )
     # options from other parts of the config
     add_bos_token: bool = II("task.add_bos_token")
@@ -377,13 +381,15 @@ def base_lm_architecture(args):
     args.moe_layers = getattr(args, "moe_layers", 0)
     args.moe_sublayers = getattr(args, "moe_sublayers", 1)
     args.moe_shuffle = getattr(args, "moe_shuffle", False)
-    args.moe_shared_layer = getattr(args, "moe_shared_layer", False)
+    args.moe_shared_moe_layer = getattr(args, "moe_shared_moe_layer", False)
+    args.moe_shared_decoder_layer = getattr(args, "moe_shared_decoder_layer", False)
     args.moe_shared_experts = getattr(args, "moe_shared_experts", False)
-    args.moe_placement = getattr(args, "moe_placement", "original")
+    # args.moe_placement = getattr(args, "moe_placement", "original")
     args.moe_layer_indices = getattr(args, "moe_layer_indices", None)
     args.moe_in_decoder_layer = getattr(args, "moe_in_decoder_layer", True)
     args.moe_bloss_weight = getattr(args, "moe_bloss_weight", 1.0)
     args.moe_bloss_type = getattr(args, "moe_bloss_type", "mean")
+    args.moe_use_fp32_gating = getattr(args, "moe_use_fp32_gating", True)
 
     args.add_bos_token = getattr(args, "add_bos_token", False)
     args.no_token_positional_embeddings = getattr(
