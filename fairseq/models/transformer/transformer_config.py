@@ -209,6 +209,57 @@ class TransformerConfig(FairseqDataclass):
         metadata={"help": "shuffle tokens between workers before computing assignment"},
     )
 
+    moe_layers: Optional[int] = field(
+        default=0, metadata={"help": "number of MoE layers in total"}
+    )
+    moe_sublayers: Optional[int] = field(
+        default=1, metadata={"help": "number of sublayers in each MoE layer"}
+    )
+    moe_shuffle: Optional[int] = field(
+        default=1,
+        metadata={"help": "shuffle tokens between workers before computing assignment"},
+    )
+    moe_shared_moe_layer: Optional[bool] = field(
+        default=False,
+        metadata={"help": "tie the entirety of the MoE layers"},
+    )
+    moe_shared_decoder_layer: Optional[bool] = field(
+        default=False,
+        metadata={"help": "tie the entirety of the MoE decoder layers"},
+    )
+    moe_shared_experts: Optional[bool] = field(
+        default=False,
+        metadata={"help": "tie the expert weights"},
+    )
+    # moe_placement: Optional[str] = field(
+    #     default='original',
+    #     metadata={"help": ""},
+    # )
+    moe_layer_indices: Optional[str] = field(
+        default=None,
+        metadata={"help": "comma separated of indices at which to place MoE layers"},
+    )
+    moe_in_decoder_layer: Optional[bool] = field(
+        default=True,
+        metadata={"help": "whether to use MoE within the decoder layers or in addition"}
+    )
+    # moe_share_attention: Optional[bool] = field(
+    #     default=False,
+    #     metadata={},
+    # )
+    moe_bloss_weight: Optional[float] = field(
+        default=1.0,
+        metadata={},
+    )
+    moe_bloss_type: Optional[str] = field(
+        default='mean',
+        metadata={'help': 'which balancing loss to use. Options: mean or mean-diff'},
+    )
+    moe_use_fp32_gating: Optional[bool] = field(
+        default=True,
+        metadata={"help": "use fp32 for gate logits (stabilizes)"}
+    )
+
     export: bool = field(
         default=False,
         metadata={"help": "make the layernorm exportable with torchscript."},
