@@ -848,6 +848,10 @@ class Trainer(object):
             )
             grad_norm = torch.tensor(0.0).cuda()
             self.zero_grad()
+            weights = {}
+            for name, param in self.model.named_parameters():
+                weights[name] = torch.norm(param.data)
+            # logger.info(weights)
         except RuntimeError as e:
             if "out of memory" in str(e):
                 self._log_oom(e)

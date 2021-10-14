@@ -177,6 +177,8 @@ class MoECrossEntropyCriterion(FairseqCriterion):
             count = 0
             for _, module in model.named_modules():
                 # if isinstance(module, MoELayer):
+                # NOTE: I have a circular import somewhere if I try to import MoELayer. 
+                # Haven't figure out how to resolve it yet
                 if getattr(module, "moe_metadata", None):
                     total_val += module.moe_metadata[key] if key in module.moe_metadata else 0
                     count += 1

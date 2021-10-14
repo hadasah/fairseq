@@ -145,6 +145,7 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             if i in moe_indices and shared_moe_decoder_layer
             else self.build_decoder_layer(
                 cfg, no_encoder_attn=no_encoder_attn, shared_moe_layer=shared_moe_layer, 
+                # cfg, no_encoder_attn=no_encoder_attn, shared_moe_layer=(moe_layer.MoELayer(cfg) if (cfg.moe_shared_moe_layer and not cfg.moe_shared_decoder_layer) else None), 
                 shared_moe_experts=shared_moe_experts, moe=(True if i in moe_indices else False))
         ) for i in range(cfg.decoder.layers)])
         # insert the MoE layers in addition to the decoder layers, if needed
@@ -212,7 +213,6 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
         self, cfg, no_encoder_attn=False, shared_moe_layer=None, shared_moe_experts=None, 
         moe=False, 
     ):
-        # TODO @margsli does this need to be modified for MoE? 
         if moe:
             layer = moe_layer.MoETransformerDecoderLayerBase(
                 cfg, no_encoder_attn=no_encoder_attn, 

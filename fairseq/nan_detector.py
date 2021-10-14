@@ -35,16 +35,19 @@ class NanDetector:
         # Dump out all model gnorms to enable better debugging
         norm = {}
         gradients = {}
+        weights = {}
         for name, param in self.named_parameters:
             if param.grad is not None:
                 grad_norm = torch.norm(param.grad.data, p=2, dtype=torch.float32)
                 norm[name] = grad_norm.item()
                 if torch.isnan(grad_norm).any() or torch.isinf(grad_norm).any():
                     gradients[name] = param.grad.data
+                weights[name] = torch.norm(param.data)
         if len(gradients) > 0:
             logger.info("Detected nan/inf grad norm, dumping norms...")
             logger.info(f"norms: {norm}")
             logger.info(f"gradients: {gradients}")
+            # logger.info(f"weights norms: {weights}")
 
         self.close()
 

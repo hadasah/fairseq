@@ -18,6 +18,7 @@ from fairseq.modules.fairseq_dropout import FairseqDropout
 from fairseq.modules.layer_norm import LayerNorm
 from fairseq.modules.multihead_attention import MultiheadAttention
 from torch import Tensor
+import torch.nn.init as init
 
 
 LOGGING_SAMPLE_FRACTION = 0.2
@@ -32,6 +33,8 @@ class MoELayer(nn.Module):
         # self.register_parameter("expert_centroids", torch.nn.Parameter(expert_centroids))
         # self.register_parameter("expert_centroids", torch.nn.Linear(args.decoder_embed_dim, self.num_workers, bias=False))
         self.expert_centroids = torch.nn.Linear(args.decoder_embed_dim, self.num_workers, bias=False)
+        # with torch.no_grad():
+        #     init.xavier_uniform_(self.expert_centroids.weight, gain=init.calculate_gain('relu')/(self.num_workers))
         self.expert_network = (
             shared_moe_experts if shared_moe_experts
             else nn.Sequential(*([MoESublayer(args) for _ in range(args.base_sublayers)]))
@@ -49,7 +52,8 @@ class MoELayer(nn.Module):
     def forward(self, input_features, *args, **kwargs):
         # input_features is s x b x e
         # features is now sb x e (which I just refer to as s x e afterwards)
-        features = input_features.reshape(-1, input_features.size(-1))
+        transposed_features = input_features.transpose(0, 1)
+        features = transposed_features.reshape(-1, input_features.size(-1))
         is_training = input_features.requires_grad
 
         if self.shuffle and is_training:
@@ -73,7 +77,7 @@ class MoELayer(nn.Module):
             result = All2All.apply(result)[self.inverse_sort(shuffle_sort)]
 
         # Return additional Nones for compatibility with TransformerDecoderLayer
-        return result.view(input_features.size()), None, None
+        return result.view(transposed_features.size()).transpose(0, 1), None, None
 
     def inverse_sort(self, order):
         # Creates an index that undoes a sort: xs==xs[order][inverse_sort(order)]
@@ -131,6 +135,9 @@ class MoELayer(nn.Module):
             # Tell other workers how many tokens to expect from us
             input_splits = All2All.apply(output_splits)
             return worker2token, input_splits.tolist(), output_splits.tolist(), metadata
+        
+        else:
+            raise Error("strategy not implemented")
 
     def calc_last_bloss(self):
         if not self.training: return 0.0
@@ -175,11 +182,20 @@ class MoESublayer(nn.Module):
         )
         self.norm = LayerNorm(args.decoder_embed_dim, export=False)
         self.ff1 = torch.nn.Linear(args.decoder_embed_dim, args.decoder_ffn_embed_dim)
+        self.norm2 = LayerNorm(args.decoder_ffn_embed_dim, export=False)
         self.ff2 = torch.nn.Linear(args.decoder_ffn_embed_dim, args.decoder_embed_dim)
+        self.norm3 = LayerNorm(args.decoder_embed_dim, export=False)
+        self.norm4 = LayerNorm(args.decoder_embed_dim, export=False)
         self.ff2.weight.data.zero_()
 
     def forward(self, xs):
+
+        # set norm correctly
+        # if self.norm2:
+        # return xs + self.ff2(self.activation_fn(self.norm2(self.ff1(self.norm(xs)))))
         return xs + self.ff2(self.activation_fn(self.ff1(self.norm(xs))))
+        # return self.norm4(xs + self.norm3(self.ff2(self.norm2(self.activation_fn(self.ff1(self.norm(xs)))))))
+        # return xs + self.norm(self.ff2(self.activation_fn(self.ff1(xs))))
 
 
 # Wraps torch.distributed.all_to_all_single as a function that supports autograd

@@ -290,7 +290,7 @@ class TransformerLanguageModel(FairseqLanguageModel):
     @classmethod
     def build_model(cls, args, task):
         """Build a new model instance."""
-
+        base_lm_architecture(args)
         if args.decoder_layers_to_keep:
             args.decoder_layers = len(args.decoder_layers_to_keep.split(","))
 
